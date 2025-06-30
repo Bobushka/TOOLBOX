@@ -12,7 +12,7 @@
 pip install fastapi uvicorn yt-dlp python-multipart
 
 ▶️ Как запустить:
-- python yt_dlp_fastapi_ui.py
+- python yt_fastapi_v2.py
 - Затем открой в браузере http://localhost:8000
 
 📂 Куда сохраняются файлы:
