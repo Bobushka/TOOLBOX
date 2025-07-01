@@ -4,6 +4,7 @@ from fastapi.concurrency import run_in_threadpool
 import yt_dlp
 import os
 from pathlib import Path
+from contextlib import asynccontextmanager
 from threading import Event
 import signal
 import socket
@@ -37,26 +38,30 @@ DOWNLOADS_PATH = str(Path.home() / "Downloads")
 # Событие для безопасной отмены скачивания между потоками
 shutdown_event_trigger = Event()
 
-app = FastAPI()
-
-@app.on_event("startup")
-def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     """
-    Эта функция выполняется при запуске приложения.
-    Она устанавливает кастомный обработчик сигнала SIGINT (Ctrl+C).
+    Управляет жизненным циклом приложения. Код до `yield` выполняется при запуске,
+    код после `yield` — при завершении.
     """
+    # Код, выполняемый при запуске (startup)
+    print("Приложение запускается. Устанавливаю обработчик Ctrl+C.")
     original_sigint_handler = signal.getsignal(signal.SIGINT)
 
     def custom_sigint_handler(signum, frame):
         print("\nОбнаружено нажатие Ctrl+C. Отправляю сигнал на отмену скачивания...")
         shutdown_event_trigger.set()
-
-        # Вызываем оригинальный обработчик, чтобы uvicorn мог штатно завершить работу
         if callable(original_sigint_handler):
             original_sigint_handler(signum, frame)
 
     signal.signal(signal.SIGINT, custom_sigint_handler)
+    
+    yield  # Здесь приложение работает
 
+    # Код, выполняемый при завершении (shutdown)
+    print("Приложение завершает работу.")
+
+app = FastAPI(lifespan=lifespan)
 HTML_TEMPLATE = """
 <html>
 <head>
@@ -152,7 +157,7 @@ async def form_page():
 
 def _download_task(url: str, cancel_event: Event):
     """Функция скачивания, выполняемая в отдельном потоке."""
-    def progress_hook(d):
+    def progress_hook(_):
         if cancel_event.is_set():
             raise yt_dlp.utils.DownloadCancelled('Download cancelled by server shutdown.')
 
@@ -162,8 +167,8 @@ def _download_task(url: str, cancel_event: Event):
         'noplaylist': True,
         'merge_output_format': 'mp4',
         'retries': 30,
-        'fragment_retries': 30,
-        'socket_timeout': 30,
+        'fragment_retries': 50,
+        'socket_timeout': 10,
         'continuedl': True,
         'concurrent_fragment_downloads': 1,
         'progress_hooks': [progress_hook],  # Добавляем хук для отслеживания прогресса
